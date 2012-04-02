@@ -1,6 +1,6 @@
-CFLAGS  = -g -Wall -Wextra -pedantic -std=c99
-LDFLAGS = -g -lncurses -lkvm
-PREFIX  = /usr
+CFLAGS  = -g -Wall -Wextra -pedantic -std=c99 -I/usr/pkg/include/ -I/usr/pkg/include/ncurses
+LDFLAGS = -g -lkvm -L/usr/pkg/lib -lncurses -Wl,-R/usr/pkg/lib
+PREFIX  = /usr/pkg
 SRC     = main.c machine.c gui.c proc.c util.c
 OBJ     = ${SRC:.c=.o}
 

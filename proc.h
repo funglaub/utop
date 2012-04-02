@@ -1,7 +1,8 @@
 #ifndef PROC_H
 #define PROC_H
 
-#include <sys/user.h> // CPUSTATES
+#include <sys/time.h>
+#include <sys/sched.h> // CPUSTATES
 
 struct myproc
 {

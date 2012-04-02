@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <time.h>
 #include <stdarg.h>
+#include <errno.h>
 
 #include "proc.h"
 #include "gui.h"
@@ -162,12 +163,12 @@ void showproc(struct myproc *proc, int *py, int indent)
         attron(ATTR_LOCK);
       else if(proc == search_proc)
         attron(ATTR_SEARCH);
-      else if(proc->flag & P_JAILED)
-        attron(ATTR_JAILED);
+      /* else if(proc->flag & P_JAILED) */
+      /*   attron(ATTR_JAILED); */
       else if(!owned)
         attron(ATTR_NOT_OWNED);
 
-      if(!(proc->flag & P_JAILED)){ // non-jailed processes
+      /* if(!(proc->flag & P_JAILED)){ // non-jailed processes */
         len -= snprintf(buf, sizeof buf,
                         "% 7d       %-7s "
                         "%-*s %-*s "
@@ -178,23 +179,23 @@ void showproc(struct myproc *proc, int *py, int indent)
                         max_gnam_len, proc->gnam,
                         proc->pc_cpu
                         );
-      } else { // processes in a jail; display Jail ID
-        len -= snprintf(buf, sizeof buf,
-                        "% 7d  %3d  %-7s "
-                        "%-*s %-*s "
-                        "%3.1f"
-                        ,
-                        proc->pid, proc->jid, proc->state_str,
-                        max_unam_len, proc->unam,
-                        max_gnam_len, proc->gnam,
-                        proc->pc_cpu
-                        );
-      }
+      /* } else { // processes in a jail; display Jail ID */
+      /*   len -= snprintf(buf, sizeof buf, */
+      /*                   "% 7d  %3d  %-7s " */
+      /*                   "%-*s %-*s " */
+      /*                   "%3.1f" */
+      /*                   , */
+      /*                   proc->pid, proc->jid, proc->state_str, */
+      /*                   max_unam_len, proc->unam, */
+      /*                   max_gnam_len, proc->gnam, */
+      /*                   proc->pc_cpu */
+      /*                   ); */
+      /* } */
       addstr(buf);
 
       getyx(stdscr, y, x);
 
-      if(proc->state == SRUN){
+      if(proc->state == LSRUN){
         mvchgat(y, 14, 7, 0, COLOR_RUNNING + 1, NULL);
         move(y, x);
       }
@@ -227,8 +228,8 @@ void showproc(struct myproc *proc, int *py, int indent)
         attroff(ATTR_SEARCH);
       else if(owned)
         attroff(ATTR_BASENAME);
-      else if(proc->flag & P_JAILED)
-        attroff(ATTR_JAILED);
+      /* else if(proc->flag & P_JAILED) */
+      /*   attroff(ATTR_JAILED); */
       else
         attroff(ATTR_NOT_OWNED);
     }
@@ -464,15 +465,16 @@ void info(struct myproc *p)
            "uid: %d (%s), gid: %d (%s)\n"
            "jid: %d\n"
            "state: %s (%s), nice: %d\n"
-           "CPU time: %s, MEM size: %s\n"
-           "tty: %s\n"
+           /* "CPU time: %s, MEM size: %s\n" */
+           /* "tty: %s\n" */
            ,
            p->pid, p->ppid,
            p->uid, p->unam, p->gid, p->gnam,
            p->jid,
-           p->state_str, state_abbrev[(int)p->state], p->nice,
-           format_seconds(p->cputime), format_kbytes(p->size),
-           p->tty);
+           p->state_str, state_abbrev[(int)p->state], p->nice
+           /* format_seconds(p->cputime), format_kbytes(p->size), */
+           /* p->tty */
+           );
 
   for(i = 0; p->argv[i]; i++)
     printw("argv[%d] = \"%s\"\n", i, p->argv[i]);

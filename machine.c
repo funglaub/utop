@@ -8,24 +8,35 @@
 #include <pwd.h>
 #include <grp.h>
 #include <sys/types.h>
+#include <sys/param.h>
 #include <sys/sysctl.h>
 #include <sys/stat.h> // S_IFCHR
 #include <sys/file.h> // O_RDONLY
+#include <sys/lwp.h>
 
 #include "util.h"
 #include "machine.h"
 #include "proc.h"
 
-#define PROCSIZE(pp) ((pp)->ki_size / 1024)
+#define PROCSIZE(pp) ((pp)->p_size / 1024)
 
-// Process states - short form
-// SIDL 1   /* Process being created by fork. */
-// SRUN 2   /* Currently runnable. */
-// SSLEEP 3   /* Sleeping on an address. */
-// SSTOP  4   /* Process debugging or suspension. */
-// SZOMB  5   /* Awaiting collection by parent. */
-// SWAIT  6   /* Waiting or interrupt. */
-// SLOCK  7   /* Blocked on a lock. */
+/*
+ * Status values.
+ *
+ * A note about SRUN and SONPROC: SRUN indicates that a process is
+ * runnable but *not* yet running, i.e. is on a run queue.  SONPROC
+ * indicates that the process is actually executing on a CPU, i.e.
+ * it is no longer on a run queue.
+ */
+/* #define LSIDL           1       /\* Process being created by fork. *\/ */
+/* #define LSRUN           2       /\* Currently runnable. *\/ */
+/* #define LSSLEP         3       /\* Sleeping on an address. *\/ */
+/* #define LSSTOP          4       /\* Process debugging or suspension. *\/ */
+/* #define LSZOMB          5       /\* Awaiting collection by parent. *\/ */
+/* /\* unused, for source compatibility with NetBSD 4.0 and earlier. *\/ */
+/* #define LSDEAD          6       /\* Process is almost a zombie. *\/ */
+/* #define LSONPROC        7       /\* Process is currently on a CPU. *\/ */
+/* #define LSSUSPENDED     8       /\* Not running, not signalable. *\/ */
 
 // Take from top(8)
 const char *state_abbrev[] = {
@@ -75,14 +86,14 @@ void init_machine(struct procstat *pst)
 
   // Number of cpus
   ncpus = 0;
-  GETSYSCTL("kern.smp.cpus", ncpus);
+  /* GETSYSCTL("kern.smp.cpus", ncpus); */
   pst->ncpus = ncpus;
 
   // Populate cpu states once:
   GETSYSCTL("kern.cp_time", pst->cpu_cycles);
 
   // Finally, open kvm handle
-  if((kd = kvm_open(NULL, _PATH_DEVNULL, NULL, O_RDONLY, NULL)) == NULL){
+  if((kd = kvm_open(NULL, NULL, NULL, KVM_NO_FILES, "kvm_open")) == NULL){
     perror("kd");
     abort();
   }
@@ -161,20 +172,22 @@ void get_mem_usage(struct procstat *pst)
   long bufspace = 0;
   int memory_stats[6];
 
-  GETSYSCTL("vfs.bufspace", bufspace);
-  GETSYSCTL("vm.stats.vm.v_active_count", memory_stats[0]);
-  GETSYSCTL("vm.stats.vm.v_inactive_count", memory_stats[1]);
-  GETSYSCTL("vm.stats.vm.v_wire_count", memory_stats[2]);
-  GETSYSCTL("vm.stats.vm.v_cache_count", memory_stats[3]);
-  GETSYSCTL("vm.stats.vm.v_free_count", memory_stats[5]);
-  /* convert memory stats to Kbytes */
-  pst->memory[0] = pagetok(memory_stats[0]);
-  pst->memory[1] = pagetok(memory_stats[1]);
-  pst->memory[2] = pagetok(memory_stats[2]);
-  pst->memory[3] = pagetok(memory_stats[3]);
-  pst->memory[4] = bufspace / 1024;
-  pst->memory[5] = pagetok(memory_stats[5]);
-  pst->memory[6] = -1;
+  for(int i=0; i < 6; i++)
+    pst->memory[i] = 0;
+  /* GETSYSCTL("vfs.bufspace", bufspace); */
+  /* GETSYSCTL("vm.stats.vm.v_active_count", memory_stats[0]); */
+  /* GETSYSCTL("vm.stats.vm.v_inactive_count", memory_stats[1]); */
+  /* GETSYSCTL("vm.stats.vm.v_wire_count", memory_stats[2]); */
+  /* GETSYSCTL("vm.stats.vm.v_cache_count", memory_stats[3]); */
+  /* GETSYSCTL("vm.stats.vm.v_free_count", memory_stats[5]); */
+  /* /\* convert memory stats to Kbytes *\/ */
+  /* pst->memory[0] = pagetok(memory_stats[0]); */
+  /* pst->memory[1] = pagetok(memory_stats[1]); */
+  /* pst->memory[2] = pagetok(memory_stats[2]); */
+  /* pst->memory[3] = pagetok(memory_stats[3]); */
+  /* pst->memory[4] = bufspace / 1024; */
+  /* pst->memory[5] = pagetok(memory_stats[5]); */
+  /* pst->memory[6] = -1; */
 }
 
 void get_cpu_stats(struct procstat *pst)
@@ -218,62 +231,62 @@ const char* format_cpu_pct(double cpu_pct[CPUSTATES])
   return buf;
 }
 
-const char *proc_state_str(struct kinfo_proc *pp) {
+const char *proc_state_str(struct kinfo_proc2 *pp) {
   static char status[10];
 
-  char state = pp->ki_stat;
+  /* char state = pp->p_stat; */
 
-  if (pp) {
-    switch (state) {
-      case SRUN:
-        if (pp->ki_oncpu != 0xff)
-          sprintf(status, "CPU%d", pp->ki_oncpu);
-        else
-          strcpy(status, "RUN");
-        break;
-      case SLOCK:
-        if (pp->ki_kiflag & KI_LOCKBLOCK) {
-          sprintf(status, "*%.6s", pp->ki_lockname);
-          break;
-        }
-        /* fall through */
-      case SSLEEP:
-        if (pp->ki_wmesg != NULL) {
-          sprintf(status, "%.6s", pp->ki_wmesg);
-          break;
-        }
-        /* FALLTHROUGH */
-      default:
-        if (state >= 0)
-          sprintf(status, "%.6s", state_abbrev[(int)state]);
-        else
-          sprintf(status, "?%5d", state);
-        break;
-    }
-  } else {
+  /* if (pp) { */
+  /*   switch (state) { */
+  /*     case LSRUN: */
+  /*       if (pp->p_cpuid != 0xff) */
+  /*         sprintf(status, "CPU%lu", pp->p_cpuid); */
+  /*       else */
+  /*         strcpy(status, "RUN"); */
+  /*       break; */
+  /*     case LSSTOP: */
+  /*       if (pp->p_kiflag & P_LOCKBLOCK) { */
+  /*         sprintf(status, "*%.6s", pp->p_lockname); */
+  /*         break; */
+  /*       } */
+  /*       /\* fall through *\/ */
+  /*     case LSSLEEP: */
+  /*       if (pp->p_wmesg != NULL) { */
+  /*         sprintf(status, "%.6s", pp->p_wmesg); */
+  /*         break; */
+  /*       } */
+  /*       /\* FALLTHROUGH *\/ */
+  /*     default: */
+  /*       if (state >= 0) */
+  /*         sprintf(status, "%.6s", state_abbrev[(int)state]); */
+  /*       else */
+  /*         sprintf(status, "?%5d", state); */
+  /*       break; */
+  /*   } */
+  /* } else { */
     strcpy(status, " ");
-  }
+  /* } */
 
   return status;
 }
 
-struct kinfo_proc *machine_proc_exists(pid_t pid)
+struct kinfo_proc2 *machine_proc_exists(pid_t pid)
 {
-  struct kinfo_proc *proc = NULL;
+  struct kinfo_proc2 *proc = NULL;
   int num_procs = 0;
 
-  proc = kvm_getprocs(kd, KERN_PROC_PID, pid, &num_procs);
+  proc = kvm_getproc2(kd, KERN_PROC_PID, pid, sizeof(struct kinfo_proc2), &num_procs);
 
   return proc;
 }
 
 char **machine_get_argv(pid_t pid)
 {
-  struct kinfo_proc *proc;
+  struct kinfo_proc2 *proc;
   char **argv = NULL;
 
   if((proc = machine_proc_exists(pid)) != NULL)
-    argv = kvm_getargv(kd, proc, 0);
+    argv = kvm_getargv2(kd, proc, 0);
 
   return argv;
 }
@@ -282,39 +295,37 @@ char **machine_get_argv(pid_t pid)
 /* Returns 0 on success, -1 on error */
 int machine_update_proc(struct myproc *proc, struct procstat *pst)
 {
-  struct kinfo_proc *pp;
+  struct kinfo_proc2 *pp;
 
   if ( (pp = machine_proc_exists(proc->pid)) != NULL ) {
     if(proc->basename)
       free(proc->basename);
-    proc->basename = ustrdup(pp->ki_comm);
-    proc->pid = pp->ki_pid;
-    proc->ppid = pp->ki_ppid;
-    proc->state = pp->ki_stat;
+    proc->basename = ustrdup(pp->p_comm);
+    proc->pid = pp->p_pid;
+    proc->ppid = pp->p_ppid;
+    proc->state = pp->p_stat;
     if(proc->state_str)
       free(proc->state_str);
     proc->state_str = ustrdup(proc_state_str(pp));
-    proc->uid = pp->ki_ruid;
-    proc->gid = pp->ki_rgid;
-    proc->nice = pp->ki_nice;
-    proc->pc_cpu = pctdouble(pp->ki_pctcpu, pst->fscale);
-    proc->flag = pp->ki_flag;
+    proc->uid = pp->p_ruid;
+    proc->gid = pp->p_rgid;
+    proc->nice = pp->p_nice;
+    proc->pc_cpu = pctdouble(pp->p_pctcpu, pst->fscale);
+    proc->flag = pp->p_flag;
 
     /*
      * Convert the process's runtime from microseconds to seconds.  This
      * time includes the interrupt time although that is not wanted here.
      * ps(1) is similarly sloppy.
      */
-    proc->cputime = (pp->ki_runtime + 500000) / 1000000;
+    /* proc->cputime = (pp->p_runtime + 500000) / 1000000; */
 
-    proc->size = PROCSIZE(pp);
+    /* proc->size = PROCSIZE(pp); */
 
     // Set tty
-    char buf[8];
-    devname_r(pp->ki_tdev, S_IFCHR, buf, 8);
-    if(proc->tty)
-      free(proc->tty);
-    proc->tty = ustrdup(buf);
+    /* if(proc->tty) */
+    /*   free(proc->tty); */
+    /* proc->tty = ustrdup(devname(pp->p_tdev, S_IFCHR)); */
 
     return 0;
   } else {
@@ -322,14 +333,14 @@ int machine_update_proc(struct myproc *proc, struct procstat *pst)
   }
 }
 
-struct myproc *machine_proc_new(struct kinfo_proc *pp) {
+struct myproc *machine_proc_new(struct kinfo_proc2 *pp) {
   struct myproc *this = NULL;
 
   this = umalloc(sizeof(*this));
 
-  this->basename = ustrdup(pp->ki_comm);
-  this->uid = pp->ki_uid;
-  this->gid = pp->ki_rgid;
+  this->basename = ustrdup(pp->p_comm);
+  this->uid = pp->p_uid;
+  this->gid = pp->p_rgid;
 
   struct passwd *passwd;
   struct group  *group;
@@ -347,11 +358,11 @@ struct myproc *machine_proc_new(struct kinfo_proc *pp) {
   GETPW(this->uid, this->unam, passwd, getpwuid, pw_name);
   GETPW(this->gid, this->gnam,  group, getgrgid, gr_name);
 
-  this->pid  = pp->ki_pid;
+  this->pid  = pp->p_pid;
   this->ppid = -1;
-  this->jid = pp->ki_jid;
-  this->state = pp->ki_stat;
-  this->flag = pp->ki_flag;
+  this->jid = 0;
+  this->state = pp->p_stat;
+  this->flag = pp->p_flag;
 
   proc_handle_rename(this);
 
@@ -362,41 +373,40 @@ void machine_proc_listall(struct myproc **procs, struct procstat *stat)
 {
   // This is the number of processes that kvm_getprocs returns
   int num_procs = 0;
-
   // get all processes
-  struct kinfo_proc *pbase; // defined in /usr/include/sys/user.h
+  struct kinfo_proc2 *pbase; // defined in /usr/include/sys/user.h
 
-  if ((pbase = kvm_getprocs(kd, KERN_PROC_PROC, 0, &num_procs) )) {
-    struct kinfo_proc *pp;
+  if ((pbase = kvm_getproc2(kd, KERN_PROC_ALL, 0, sizeof(struct kinfo_proc2), &num_procs) )) {
+    struct kinfo_proc2 *pp;
     int i;
 
     // We iterate over each kinfo_struct pointer and check if it
     // exists already in our hash table. If it is not present yet, add
     // it to the table and increase the global process counter
     for(pp = pbase, i = 0; i < num_procs; pp++, i++) {
-      if(!proc_listcontains(procs, pp->ki_pid)){
+      if(!proc_listcontains(procs, pp->p_pid)){
         struct myproc *p = machine_proc_new(pp);
 
         // TODO: (code from top)
-        /* if (!show_kidle && pp->ki_tdflags & TDF_IDLETD) */
+        /* if (!show_kidle && pp->p_tdflags & TDF_IDLETD) */
         /*   /\* skip kernel idle process *\/ */
         /*   continue; */
-        /* if (pp->ki_stat == 0) */
+        /* if (pp->p_stat == 0) */
         /*   /\* not in use *\/ */
         /*   continue; */
 
-        /* if (!show_self && pp->ki_pid == sel->self) */
+        /* if (!show_self && pp->p_pid == sel->self) */
         /*   /\* skip self *\/ */
         /*   continue; */
 
-        /* if (!show_system && (pp->ki_flag & P_SYSTEM)) */
+        /* if (!show_system && (pp->p_flag & P_SYSTEM)) */
         /*   /\* skip system process *\/ */
         /*   continue; */
 
         if(p) {
           proc_addto(procs, p);
           stat->count++;
-          if(pp->ki_stat == SZOMB)
+          if(pp->p_stat == SZOMB)
             stat->zombies++;
         }
       }

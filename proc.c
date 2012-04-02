@@ -290,7 +290,7 @@ void proc_update(struct myproc **procs, struct procstat *pst)
           proc_update_single(p, procs, pst);
           count++;
 
-          if(p->state == SRUN)
+          if(p->state == LSRUN)
             running++;
           if(p->uid == global_uid)
             owned++;
