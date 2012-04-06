@@ -1,0 +1,1 @@
+This repository is not maintained anymore. For an up-to-date version please look at [jeffwar's repository].
