@@ -18,7 +18,7 @@ install: utop
 	cp utop.1 ${PREFIX}/share/man/man1/
 
 uninstall:
-	rm -f ${PREFIX}/bin/utop ${PREFIX}/share/man/man1/
+	rm -f ${PREFIX}/bin/utop ${PREFIX}/share/man/man1/utop.1
 
 gui.o: gui.c proc.h gui.h util.h config.h machine.c machine.h
 main.o: main.c proc.h gui.h config.h
